@@ -1,0 +1,2 @@
+
+-DCATKIN_DEVEL_PREFIX=/home/jrguajeg/Courses/IS_Intro/rrt/devel -DCMAKE_INSTALL_PREFIX=/home/jrguajeg/Courses/IS_Intro/rrt/install -G Unix Makefiles
