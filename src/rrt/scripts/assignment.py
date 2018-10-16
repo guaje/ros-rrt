@@ -4,16 +4,17 @@ from geometry_msgs.msg import Point
 from std_msgs.msg import String
 from visualization_msgs.msg import Marker
 
+from tree import Tree, TreeNode
+
 import math
 import random
 import rospy
 
 HZ = 5
-STEP = 0.5
+STEP = 1.0
 
 BOARD_CORNERS = [-5, 5, 5, -5]
 
-path = Marker()
 
 def create_obstacles():
     obst1 = Marker()
@@ -84,6 +85,7 @@ def create_obstacles():
 
     return [obst1, obst2, obst3, obst4, obst5]
 
+
 def create_robot():
     rob = Marker()
     rob.type = rob.CUBE
@@ -98,9 +100,10 @@ def create_robot():
     rob.lifetime = rospy.Duration()
     return rob
 
+
 def create_target():
     tgt = Marker()
-    tgt.type = tgt.CYLINDER
+    tgt.type = tgt.CUBE
     tgt.header.frame_id = "map"
     tgt.ns = "target"
     tgt.id = 0
@@ -112,29 +115,19 @@ def create_target():
     tgt.lifetime = rospy.Duration()
     return tgt
 
-def get_vertices_structure():
-    vertices = Marker()
-    vertices.type = vertices.POINTS
-    vertices.header.frame_id = "map"
-    vertices.ns = "vertices"
-    vertices.id = 0
-    vertices.action = vertices.ADD
-    vertices.scale.x, vertices.scale.y = 0.05, 0.05
-    vertices.pose.orientation.w = 1.0
-    vertices.color.r, vertices.color.g, vertices.color.b, vertices.color.a = 1.00, 0.95, 0.69, 1.00
-    return vertices
 
-def get_edges_structure():
+def get_tree_edges_structure():
     edges = Marker()
     edges.type = edges.LINE_LIST
     edges.header.frame_id = "map"
-    edges.ns = "edges"
+    edges.ns = "tree_edges"
     edges.id = 0
     edges.action = edges.ADD
     edges.scale.x = 0.02
     edges.pose.orientation.w = 1.0
     edges.color.r, edges.color.g, edges.color.b, edges.color.a = 1.00, 0.95, 0.69, 1.00
     return edges
+
 
 def get_point_structure():
     point = Marker()
@@ -145,8 +138,131 @@ def get_point_structure():
     point.action = point.ADD
     point.scale.x, point.scale.y = 0.05, 0.05
     point.pose.orientation.w = 1.0
-    point.color.r, point.color.g, point.color.b, point.color.a = 0.96, 0.67, 0.67, 1.00
+    point.color.r, point.color.g, point.color.b, point.color.a = 0.45, 0.31, 0.31, 1.00
     return point
+
+
+def get_collision_edges_structure():
+    edges = Marker()
+    edges.type = edges.LINE_LIST
+    edges.header.frame_id = "map"
+    edges.ns = "collision_edges"
+    edges.id = 0
+    edges.action = edges.ADD
+    edges.scale.x = 0.02
+    edges.pose.orientation.w = 1.0
+    edges.color.r, edges.color.g, edges.color.b, edges.color.a = 0.96, 0.67, 0.67, 1.00
+    return edges
+
+
+def get_path_edges_structure():
+    edges = Marker()
+    edges.type = edges.LINE_LIST
+    edges.header.frame_id = "map"
+    edges.ns = "path_edges"
+    edges.id = 0
+    edges.action = edges.ADD
+    edges.scale.x = 0.06
+    edges.pose.orientation.w = 1.0
+    edges.color.r, edges.color.g, edges.color.b, edges.color.a = 0.35, 0.75, 0.75, 1.00
+    return edges
+
+
+def get_obstacles_lines(obstacles):
+    lines = []
+    lines.append((Point(BOARD_CORNERS[0], BOARD_CORNERS[2], 0), Point(BOARD_CORNERS[1], BOARD_CORNERS[2], 0)))
+    lines.append((Point(BOARD_CORNERS[0], BOARD_CORNERS[3], 0), Point(BOARD_CORNERS[1], BOARD_CORNERS[3], 0)))
+    lines.append((Point(BOARD_CORNERS[0], BOARD_CORNERS[2], 0), Point(BOARD_CORNERS[0], BOARD_CORNERS[3], 0)))
+    lines.append((Point(BOARD_CORNERS[1], BOARD_CORNERS[2], 0), Point(BOARD_CORNERS[1], BOARD_CORNERS[3], 0)))
+    for obst in obstacles:
+        scale_x = obst.scale.x
+        scale_y = obst.scale.y
+        pos_x = obst.pose.position.x
+        pos_y = obst.pose.position.y
+        if obst.type == obst.CUBE:  # Only rectangular obstacles are supported
+            # Only aligned obstacles are supported
+            x_i = pos_x - scale_x / 2
+            x_f = pos_x + scale_x / 2
+            y_i = pos_y - scale_y / 2
+            y_f = pos_y + scale_y / 2
+            lines.append((Point(x_i, y_i, 0), Point(x_f, y_i, 0)))
+            lines.append((Point(x_i, y_f, 0), Point(x_f, y_f, 0)))
+            lines.append((Point(x_i, y_i, 0), Point(x_i, y_f, 0)))
+            lines.append((Point(x_f, y_i, 0), Point(x_f, y_f, 0)))
+    return lines
+
+
+def get_target_lines(target):
+    lines = []
+    scale_x = target.scale.x
+    scale_y = target.scale.y
+    pos_x = target.pose.position.x
+    pos_y = target.pose.position.y
+    if target.type == target.CUBE:  # Only rectangular obstacles are supported
+        # Only aligned obstacles are supported
+        x_i = pos_x - scale_x / 2
+        x_f = pos_x + scale_x / 2
+        y_i = pos_y - scale_y / 2
+        y_f = pos_y + scale_y / 2
+        lines.append((Point(x_i, y_i, 0), Point(x_f, y_i, 0)))
+        lines.append((Point(x_i, y_f, 0), Point(x_f, y_f, 0)))
+        lines.append((Point(x_i, y_i, 0), Point(x_i, y_f, 0)))
+        lines.append((Point(x_f, y_i, 0), Point(x_f, y_f, 0)))
+    return lines
+
+
+def orientation(p, q, r):
+    """
+    https://www.geeksforgeeks.org/check-if-two-given-line-segments-intersect/
+    :param p:
+    :param q:
+    :param r:
+    :return:
+    """
+    val = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y)
+    if val == 0:
+        return 0
+    return 1 if val > 0 else 2
+
+
+def on_segment(p, q, r):
+    """
+    https://www.geeksforgeeks.org/check-if-two-given-line-segments-intersect/
+    :param p:
+    :param q:
+    :param r:
+    :return:
+    """
+    if min(p.x, r.x) <= q.x <= max(p.x, r.x) and min(p.y, r.y) <= q.y <= max(p.y, r.y):
+        return True
+    return False
+
+
+def collides_line(point_i, point_e, line):
+    p_i, p_e = line
+    o1 = orientation(point_i, point_e, p_i)
+    o2 = orientation(point_i, point_e, p_e)
+    o3 = orientation(p_i, p_e, point_i)
+    o4 = orientation(p_i, p_e, point_e)
+    if o1 != o2 and o3 != o4:
+        return True
+    if o1 == 0 and on_segment(point_i, p_i, point_e):
+        return True
+    if o2 == 0 and on_segment(point_i, p_e, point_e):
+        return True
+    if o3 == 0 and on_segment(p_i, point_i, p_e):
+        return True
+    if o4 == 0 and on_segment(p_i, point_e, p_e):
+        return True
+    return False
+
+
+def collides_object(point_i, point_e, lines):
+    for line in lines:
+        if collides_line(point_i, point_e, line):
+            return True
+    return False
+
 
 def run_ros():
     rospy.init_node('ros_demo')
@@ -157,23 +273,39 @@ def run_ros():
     marker_pub = rospy.Publisher('visualization_marker', Marker, queue_size=10)
 
     # Each second, ros "spins" and draws 20 frames
-    loop_rate = rospy.Rate(20) # 20hz
+    loop_rate = rospy.Rate(20)  # 20hz
 
     frame_count = 0
 
-    slice_index = 0
-
     obstacles = create_obstacles()
+
+    obstacles_lines = get_obstacles_lines(obstacles)
 
     robot = create_robot()
 
     target = create_target()
 
+    target_lines = get_target_lines(target)
+
     point = get_point_structure()
 
-    vertices = get_vertices_structure()
+    tree_edges = get_tree_edges_structure()
 
-    edges = get_edges_structure()
+    p0 = Point(robot.pose.position.x, robot.pose.position.y, 0)
+
+    tree = Tree(TreeNode(p0))
+
+    collision_edges = get_collision_edges_structure()
+
+    found_path = False
+
+    path_edges = get_path_edges_structure()
+
+    drawed_path = False
+
+    robot_reached = False
+
+    path_points = []
 
     while not rospy.is_shutdown():
         msg = "Frame index: %s" % frame_count
@@ -187,106 +319,69 @@ def run_ros():
             marker_pub.publish(obst)
 
         robot.header.stamp = rospy.Time.now()
-        marker_pub.publish(robot)
 
         target.header.stamp = rospy.Time.now()
         marker_pub.publish(target)
 
-        p0 = Point()
-        p0.x, p0.y, p0.z = robot.pose.position.x, robot.pose.position.y, 0
-
         point.header.stamp = rospy.Time.now()
 
-        vertices.header.stamp = rospy.Time.now()
-        edges.header.stamp = rospy.Time.now()
+        tree_edges.header.stamp = rospy.Time.now()
 
-        num_slice = 20 # e.g., to create 20 edges
+        collision_edges.header.stamp = rospy.Time.now()
 
-        if frame_count % HZ == 0 and len(edges.points) <= 2 * num_slice:
-            r_p = Point()
-            r_p.x = random.uniform(BOARD_CORNERS[0], BOARD_CORNERS[1])
-            r_p.y = random.uniform(BOARD_CORNERS[3], BOARD_CORNERS[2])
-            r_p.z = 0
-            point.points = [r_p]
+        path_edges.header.stamp = rospy.Time.now()
 
-            p = Point()
-            angle = slice_index * 2 * math.pi / num_slice
-            slice_index += 1
-            p.x = STEP * math.cos(angle) + p0.x
-            p.y = STEP * math.sin(angle) + p0.y
-            p.z = 0
-            vertices.points.append(p)  # For drawing vertices
-            edges.points.append(p0)  # For drawing edges. The line list needs two points for each line
-            edges.points.append(p)
+        if frame_count % HZ == 0 and not found_path:
+            rand_pnt = Point()
+            rand_pnt.x = random.uniform(BOARD_CORNERS[0], BOARD_CORNERS[1])
+            rand_pnt.y = random.uniform(BOARD_CORNERS[3], BOARD_CORNERS[2])
+            rand_pnt.z = 0
+            point.points = [rand_pnt]
 
+            close_node = tree.get_closest_node(rand_pnt)
+            close_pnt = close_node.point
+
+            # https://math.stackexchange.com/questions/175896/finding-a-point-along-a-line-a-certain-distance-away-from-another-point
+
+            total_dist = math.sqrt(math.pow(rand_pnt.x - close_pnt.x, 2) + math.pow(rand_pnt.y - close_pnt.y, 2))
+
+            dist_ratio = STEP / total_dist
+
+            new_pnt = Point()
+            new_pnt.x = (1 - dist_ratio) * close_pnt.x + dist_ratio * rand_pnt.x
+            new_pnt.y = (1 - dist_ratio) * close_pnt.y + dist_ratio * rand_pnt.y
+            new_pnt.z = 0
+
+            if collides_object(close_pnt, new_pnt, obstacles_lines):
+                collision_edges.points.append(close_pnt)
+                collision_edges.points.append(new_pnt)
+            else:
+                last_node = tree.add_node(close_node, new_pnt)
+
+                tree_edges.points.append(close_pnt)
+                tree_edges.points.append(new_pnt)
+
+            if collides_object(close_pnt, new_pnt, target_lines):
+                found_path = True
+
+        if found_path and not drawed_path:
+            current_node = last_node
+            while not current_node.is_root():
+                path_points.append(current_node.point)
+                path_edges.points.append(current_node.point)
+                path_edges.points.append(current_node.parent.point)
+                current_node = current_node.parent
+            drawed_path = True
+
+        if frame_count % 2 == 0 and drawed_path and not robot_reached:
+            robot.pose.position = path_points.pop()
+            robot_reached = True if len(path_points) == 0 else False
+
+        marker_pub.publish(robot)
         marker_pub.publish(point)
-        marker_pub.publish(vertices)
-        marker_pub.publish(edges)
-
-        # TODO: Lines and Points function -> Paths function
-
-        """"
-
-        # From here, we are using points, lines, to draw a tree structure
-
-        # We use static here since we want to incrementally add contents in these mesgs, otherwise contents in these
-        # msgs will be cleaned in every ros spin
-        # PYTHON: Tmp solution -> Switching to global variables
-
-        vertices.type = vertices.POINTS
-        edges.type = edges.LINE_LIST
-
-        vertices.header.frame_id = "map"
-        edges.header.frame_id = "map"
-        vertices.header.stamp = rospy.Time.now()
-        edges.header.stamp = rospy.Time.now()
-        vertices.ns = "vertices_and_lines"
-        edges.ns = "vertices_and_lines"
-        vertices.action = vertices.ADD
-        edges.action = edges.ADD
-
-        vertices.pose.orientation.w = 1.0
-        edges.pose.orientation.w = 1.0
-
-        vertices.id = 0
-        edges.id = 1
-
-        # POINTS markers use x and y scale for width/height respectively
-        vertices.scale.x, vertices.scale.y = 0.05, 0.05
-
-        # LINE_STRIP/LINE_LIST markers use only the x component of scale, for the line width
-        edges.scale.x = 0.02 # Tune it yourself
-
-        # Points are green
-        vertices.color.g, vertices.color.a = 1.0, 1.0
-
-        # Line list is red
-        edges.color.r, edges.color.a = 1.0, 1.0
-
-        p0 = Point() # Root vertex
-        p0.x, p0.y, p0.z = 0, 0, 0
-
-        num_slice = 20 # e.g., to create 20 edges
-        length = 1 # length of each edge
-
-        herz = 10 # every 10 ROS frames we draw an edge
-        if frame_count % herz == 0 and len(edges.points) <= 2 * num_slice:
-            p = Point()
-
-            angle = slice_index * 2 * math.pi / num_slice
-            slice_index += 1
-            p.x = length * math.cos(angle)
-            p.y = length * math.sin(angle)
-            p.z = 0
-
-            vertices.points.append(p) # For drawing vertices
-            edges.points.append(p0) # For drawing edges. The line list needs two points for each line
-            edges.points.append(p)
-
-        marker_pub.publish(vertices)
-        marker_pub.publish(edges)
-        
-        """
+        marker_pub.publish(tree_edges)
+        marker_pub.publish(collision_edges)
+        marker_pub.publish(path_edges)
 
         # TODO: Robot function
 
@@ -355,6 +450,7 @@ def run_ros():
 
         loop_rate.sleep()
         frame_count += 1
+
 
 if __name__ == '__main__':
     try:
